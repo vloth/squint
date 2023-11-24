@@ -237,7 +237,7 @@ Please try it out and file issues so it can be improved.
 You can use this together with `inf-clojure` in emacs as follows:
 
 In a `.cljs` buffer, type `M-x inf-clojure`. Then enter the startup command `npx
-squint repl` (or `bunx --bun repl`) and select the `clojure` or `babashka` type
+squint-cljs repl` (or `bunx --bun squint-cljs repl`) and select the `clojure` or `babashka` type
 REPL. REPL away!
 
 <img src="https://pbs.twimg.com/media/F6Pry0eWwAEwsRD?format=jpg">
