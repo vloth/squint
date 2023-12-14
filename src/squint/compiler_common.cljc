@@ -3,7 +3,30 @@
   (:require
    #?(:cljs [goog.string :as gstring])
    #?(:cljs [goog.string.format])
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [squint.internal.macros :as macros]))
+
+(def common-macros
+  {'coercive-boolean macros/coercive-boolean
+   'coercive-= macros/coercive-=
+   'coercive-not= macros/coercive-not=
+   'coercive-not macros/coercive-not
+   'bit-not macros/bit-not
+   'bit-and macros/bit-and
+   'unsafe-bit-and macros/unsafe-bit-and
+   'bit-or macros/bit-or
+   'int macros/int
+   'bit-xor macros/bit-xor
+   'bit-and-not macros/bit-and-not
+   'bit-clear macros/bit-clear
+   'bit-flip macros/bit-flip
+   'bit-test macros/bit-test
+   'bit-shift-left macros/bit-shift-left
+   'bit-shift-right macros/bit-shift-right
+   'bit-shift-right-zero-fill macros/bit-shift-right-zero-fill
+   'unsigned-bit-shift-right macros/unsigned-bit-shift-right
+   'bit-set macros/bit-set
+   'undefined? macros/undefined?})
 
 #?(:cljs (def Exception js/Error))
 
@@ -15,21 +38,32 @@
 
 (defn emit-return [s env]
   (if (= :return (:context env))
-    (format "return %s;" s)
+    (format "return %s" s)
     s))
 
+(defrecord Code [js bool]
+  Object
+  (toString [_] js))
+
+(defn bool-expr [js]
+  (map->Code {:js js
+              :bool true}))
+
 (defmethod emit-special 'js* [_ env [_js* & opts :as expr]]
-  (let [[env' template substitutions] (if (map? (first opts))
+  (let [bool? (= 'boolean (:tag (meta expr)))
+        [env' template substitutions] (if (map? (first opts))
                                         [(first opts)
                                          (second opts)
                                          (drop 2 opts)]
                                         [nil (first opts) (rest opts)])]
-    (-> (reduce (fn [template substitution]
-                 (str/replace-first template "~{}"
-                                    (emit substitution (merge (assoc env :context :expr) env'))))
-               template
-               substitutions)
-        (emit-return (merge env (meta expr))))))
+    (cond->
+        (-> (reduce (fn [template substitution]
+                      (str/replace-first template "~{}"
+                                         (emit substitution (merge (assoc env :context :expr) env'))))
+                    template
+                    substitutions)
+            (emit-return (merge env (meta expr))))
+      bool? bool-expr)))
 
 (defn expr-env [env]
   (assoc env :context :expr :top-level false))
@@ -89,7 +123,7 @@
 #?(:cljs (derive js/Number ::number))
 
 (defn escape-jsx [expr env]
-  (if (:jsx env)
+  (if (and (:jsx env) (not (:jsx-runtime env)))
     (format "{%s}" expr)
     expr))
 
@@ -99,10 +133,12 @@
       (escape-jsx env)))
 
 (defmethod emit #?(:clj java.lang.String :cljs js/String) [^String expr env]
-  (-> (if (and (:jsx env)
-               (not (:jsx-attr env)))
-        expr
-        (emit-return (pr-str expr) env))))
+  (cond-> (if (and (:jsx env)
+                   (not (:jsx-attr env))
+                   (not (:jsx-runtime env)))
+            expr
+            (emit-return (pr-str expr) env))
+    (pos? (count expr)) (bool-expr)))
 
 (defmethod emit #?(:clj java.lang.Boolean :cljs js/Boolean) [^String expr env]
   (-> (if (:jsx-attr env)
@@ -124,7 +160,10 @@
 
 (def infix-operators #{"+" "+=" "-" "-=" "/" "*" "%" "=" "==" "===" "<" ">" "<=" ">=" "!="
                        "<<" ">>" "<<<" ">>>" "!==" "&" "|" "&&" "||" "not=" "instanceof"
-                       "bit-or" "bit-and" "coercive-=" "js-mod"})
+                       "bit-or" "bit-and" "js-mod"})
+
+(def boolean-infix-operators
+  #{"=" "==" "===" "<" ">" "<=" ">=" "!=" "not=" "instanceof"})
 
 (def chainable-infix-operators #{"+" "-" "*" "/" "&" "|" "&&" "||" "bit-or" "bit-and"})
 
@@ -145,8 +184,10 @@
 
 (defn emit-infix [_type enc-env [operator & args]]
   (let [env (assoc enc-env :context :expr :top-level false)
-        acount (count args)]
-    (if (and (not (chainable-infix-operators (name operator))) (> acount 2))
+        acount (count args)
+        op-name (name operator)
+        bool? (contains? boolean-infix-operators op-name)]
+    (if (and (not (chainable-infix-operators op-name)) (> acount 2))
       (emit (list 'cljs.core/&&
                   (list operator (first args) (second args))
                   (list* operator (rest args)))
@@ -154,8 +195,7 @@
       (if (and (= '- operator)
                (= 1 acount))
         (str "-" (emit (first args) env))
-        (-> (let [substitutions {'coercive-= "=="
-                                 '= "===" == "===" '!= "!=="
+        (-> (let [substitutions {'= "===" == "===" '!= "!=="
                                  'not= "!=="
                                  '+ "+"
                                  'bit-or "|"
@@ -164,7 +204,8 @@
               (str "(" (str/join (str " " (or (substitutions operator)
                                               operator) " ")
                                  (emit-args env args)) ")"))
-            (emit-return enc-env))))))
+            (emit-return enc-env)
+            (cond-> bool? (bool-expr)))))))
 
 (def core-vars (atom #{}))
 
@@ -201,29 +242,33 @@
                          (when (= "js" sym-ns)
                            (munge* (name expr)))
                          (when-let [resolved-ns (get @*aliases* (symbol sym-ns))]
-                           #_(swap! *imported-vars* update resolved-ns (fnil conj #{}) (munged-name sn))
                            (str (if (symbol? resolved-ns)
                                   (munge resolved-ns)
                                   sym-ns) "." #_#_sym-ns "_" (munged-name sn)))
-                         (if *repl*
-                           (str "globalThis." (munge *cljs-ns*) "." #_".aliases." (munge (namespace expr)) "." (munge (name expr)))
-                           (str (munge (namespace expr)) "." (munge (name expr))))))
+                         (let [munged (munge (namespace expr))]
+                           (if (and *repl* (not= "Math" munged))
+                             (str "globalThis." (munge *cljs-ns*) "." munged "." (munge (name expr)))
+                             (str munged "." (munge (name expr)))))))
                    (if-let [renamed (get (:var->ident env) expr)]
-                     (munge** (str renamed))
-                     (or
-                      (let [ns-state @(:ns-state env)
-                            current (:current ns-state)
-                            current-ns (get ns-state current)
-                            m (munged-name expr)]
+                     (cond-> (munge** (str renamed))
+                       (:bool (meta renamed)) (bool-expr))
+                     (let [ns-state @(:ns-state env)
+                           current (:current ns-state)
+                           current-ns (get ns-state current)
+                           m (munged-name expr)]
+                       (or
                         (when (contains? current-ns expr)
                           (str (when *repl*
-                                 (str (munge *cljs-ns*) ".")) m)))
-                      (some-> (maybe-core-var expr env) munge)
-                      (let [m (munged-name expr)]
-                        (if *repl*
-                          (str "globalThis." (munge *cljs-ns*) "." #_".aliases." m)
+                                 (str "globalThis." (munge *cljs-ns*) ".")) m))
+                        (some-> (maybe-core-var expr env) munge)
+                        (when (or (contains? (:refers current-ns) expr)
+                                  (let [alias (get (:aliases current-ns) expr)]
+                                    alias))
+                          (str (when *repl*
+                                 (str "globalThis." (munge *cljs-ns*) ".")) m))
+                        (let [m (munged-name expr)]
                           m)))))]
-        (emit-return (escape-jsx (str expr) env)
+        (emit-return (escape-jsx expr env)
                      env)))))
 
 (defn wrap-await
@@ -271,8 +316,11 @@
                                       var-name)
                           lhs (str renamed)
                           rhs (emit rhs (assoc env :var->ident var->ident))
+                          rhs-bool? (:bool rhs)
                           expr (format "let %s = %s;\n" lhs rhs)
-                          var->ident (assoc var->ident var-name renamed)]
+                          var->ident (assoc var->ident var-name
+                                            (vary-meta renamed
+                                                       assoc :bool rhs-bool?))]
                       [(str acc expr) var->ident]))
                   ["" upper-var->ident]
                   partitioned))
@@ -355,7 +403,7 @@
 (defn no-top-level [env]
   (dissoc env :top-level))
 
-(defn emit-var [[name ?doc ?expr :as expr] skip-var? env]
+(defn emit-var [[name ?doc ?expr :as expr] _skip-var? env]
   (let [expr (if (= 3 (count expr))
                ?expr ?doc)
         env (no-top-level env)]
@@ -365,14 +413,7 @@
                   (str (munge *cljs-ns*) ".") #_"var ")
                 (munge name))
            (str "var " (munge name))) " = "
-         (emit expr (expr-env env)) ";\n"
-         (when *repl*
-           (str (when-not skip-var?
-                  "var ") (munge name) " = " "globalThis."
-                (when *cljs-ns*
-                  (str (munge *cljs-ns*) "."))
-                (munge name)
-                ";\n")))))
+         (emit expr (expr-env env)) ";\n")))
 
 (defmethod emit-special 'def [_type env [_const & more :as expr]]
   (let [name (first more)]
@@ -401,7 +442,8 @@
   (case *target*
     :squint
     (case alias
-      (squint.string clojure.string) "squint-cljs/string.js"
+      (squint.string clojure.string) "squint-cljs/src/squint/string.js"
+      (squint.set clojure.set) "squint-cljs/src/squint/set.js"
       (if (symbol? alias)
         (if-let [resolve-ns (:resolve-ns env)]
           (or (resolve-ns alias)
@@ -412,6 +454,7 @@
     (case alias
       (cljs.string clojure.string) "cherry-cljs/lib/clojure.string.js"
       (cljs.walk clojure.walk) "cherry-cljs/lib/clojure.walk.js"
+      (cljs.set clojure.set) "cherry-cljs/lib/clojure.set.js"
       alias)
     alias))
 
@@ -439,12 +482,23 @@
                                (format "var %s = await import('%s')" as libname)
                                (format "import * as %s from '%s'" as libname))))
                 (when refer
-                  (if *repl*
-                    (str (statement (format "var { %s } = await import('%s')" (str/join ", " (map munge refer)) libname))
-                         (str/join (map (fn [sym]
-                                          (statement (str "globalThis." (munge current-ns-name) "." sym " = " sym)))
-                                        refer)))
-                    (statement (format "import { %s } from '%s'" (str/join ", " (map munge refer)) libname)))))]
+                  (swap! (:ns-state env)
+                         (fn [ns-state]
+                           (let [current (:current ns-state)]
+                             (update-in ns-state [current :refers] (fnil into #{}) refer))))
+                  (let [munged-refers (map munge refer)]
+                    (if *repl*
+                      (str (statement (format "var { %s } = await import('%s')" (str/join ", " munged-refers) libname))
+                           (str/join (map (fn [sym]
+                                            (statement (str "globalThis." (munge current-ns-name) "." sym " = " sym)))
+                                          munged-refers)))
+                      (statement (format "import { %s } from '%s'" (str/join ", " (map munge refer)) libname))))))]
+      (when as
+        (swap! (:ns-state env)
+               (fn [ns-state]
+                 (let [current (:current ns-state)]
+                   (update-in ns-state [current :aliases] (fn [aliases]
+                                                            ((fnil assoc {}) aliases as libname)))))))
       (when-not (:elide-imports env)
         expr)
       #_nil)))
@@ -608,10 +662,10 @@
         true
         (emit-return (wrap-parens (apply str (interpose " && " (emit-args env more)))) env)))
 
-  (defmethod emit-special 'or [_type env [_ & more]]
-    (if (empty? more)
-      nil
-      (emit-return (wrap-parens (apply str (interpose " || " (emit-args env more)))) env)))
+(defmethod emit-special 'or [_type env [_ & more]]
+  (if (empty? more)
+    nil
+    (emit-return (wrap-parens (apply str (interpose " || " (emit-args env more)))) env)))
 
 (defmethod emit-special 'while [_type env [_while test & body]]
   (str "while (" (emit test) ") { \n"
@@ -759,38 +813,45 @@ break;}" body)
         let `(let ~(vec (interleave bindings (repeat nil))) ~@sets ~@body)]
     (emit let env)))
 
-(defrecord Code [js bool]
-  Object
-  (toString [_] js))
-
 (defmethod emit-special 'zero? [_ env [_ num]]
-  (map->Code {:js (-> (format "(%s == 0)" (emit num (assoc env :context :expr)))
-                      (emit-return env))
-              :bool true}))
+  (bool-expr (-> (format "(%s == 0)" (emit num (assoc env :context :expr)))
+                 (emit-return env))))
+
+(defmethod emit-special 'neg? [_ env [_ num]]
+  (bool-expr (-> (format "(%s < 0)" (emit num (assoc env :context :expr)))
+                 (emit-return env))))
+
+(defmethod emit-special 'pos? [_ env [_ num]]
+  (bool-expr (-> (format "(%s > 0)" (emit num (assoc env :context :expr)))
+                 (emit-return env))))
+
+(defmethod emit-special 'nil? [_ env [_ obj]]
+  (bool-expr (-> (format "(%s == null)" (emit obj (assoc env :context :expr)))
+                 (emit-return env))))
+
+(defmethod emit-special 'js-in [_ env [_ key obj]]
+  (bool-expr (emit (list 'js* "~{} in ~{}" key obj) env)))
 
 (defmethod emit #?(:clj clojure.lang.MapEntry :cljs MapEntry) [expr env]
   ;; RegExp case moved here:
   ;; References to the global RegExp object prevents optimization of regular expressions.
   (emit (vec expr) env))
 
-(def special-forms '#{zero? js-delete})
+(def special-forms '#{zero? pos? neg? js-delete nil? js-in})
 
 (derive #?(:clj clojure.lang.Cons :cljs Cons) ::list)
 (derive #?(:clj clojure.lang.IPersistentList :cljs IList) ::list)
 (derive #?(:clj clojure.lang.LazySeq :cljs LazySeq) ::list)
 #?(:cljs (derive List ::list))
-
-(defmethod emit ::list [expr env]
-  ((-> env :emit ::list) expr env))
-
 (derive #?(:bb (class (list))
            :clj clojure.lang.PersistentList$EmptyList
            :cljs EmptyList) ::empty-list)
 
+(defmethod emit ::list [expr env]
+  ((-> env :emit ::list) expr env))
+
 (defmethod emit ::empty-list [_expr env]
-  ;; NOTE: we can later optimize this to a constant, but (.-EMPTY List) is prone
-  ;; to advanced optimization
-  (emit '(list) env))
+  (emit '(clojure.core/list) (dissoc env :quote)))
 
 #?(:cljs (derive PersistentVector ::vector))
 
@@ -827,32 +888,54 @@ break;}" body)
   (let [f (-> env :emit ::special)]
     (f sym env expr)))
 
-(defmethod emit-special 'if [_type env [_if test then else]]
+(defmethod emit-special 'if [_type env [_if test then else :as expr]]
   ;; NOTE: I tried making the output smaller if the if is in return position
   ;; if .. return .. else return ..
   ;; => return ( .. ? : ..);
   ;; but this caused issues with recur in return position:
   ;; (defn foo [x] (if x 1 (recur (dec x)))) We might fix this another time, but
   ;; tools like eslint will rewrite in the short form anyway.
-  (if (not (symbol? test))
-    ;; avoid evaluating test expression more than once
-    (emit `(let [test# ~test] (if test# ~then ~else)) env)
-    (let [expr-env (assoc env :context :expr)
-          condition (emit (if (= :squint *target*)
-                            (list 'clojure.core/t test)
-                            (list 'clojure.core/truth_ test)) expr-env)
-          #_#_condition (format "%s != null && %s !== false" condition condition)]
-      (if (= :expr (:context env))
-        (->
-         (format "((%s) ? (%s) : (%s))"
-                 condition
-                 (emit then env)
-                 (emit else env))
-         (emit-return env))
-        (str (format "if (%s) {\n" condition)
-             (emit then env)
-             "}"
-             (when (some? else)
-               (str " else {\n"
-                    (emit else env)
-                    "}")))))))
+  (let [expr-env (assoc env :context :expr)
+        naked-condition (emit test expr-env)
+        skip-truth? (or (:bool naked-condition)
+                        (:bool (meta expr))
+                        (= 'boolean (:tag (meta test))))
+        condition (if skip-truth?
+                    naked-condition
+                    (emit (list 'clojure.core/truth_ (list 'js* naked-condition)) expr-env))]
+    (if (= :expr (:context env))
+      (->
+       (format "(%s) ? (%s) : (%s)"
+               condition
+               (emit then env)
+               (emit else env))
+       (emit-return env))
+      (str (format "if (%s) {\n" condition)
+           (emit then env)
+           "}"
+           (when (some? else)
+             (str " else {\n"
+                  (emit else env)
+                  "}"))))))
+
+(defn jsx-attrs [v env]
+  (let [env (expr-env env)]
+    (if (:jsx-runtime env)
+      (when v
+        (emit v (dissoc env :jsx)))
+      (if (seq v)
+        (str
+         " "
+         (str/join " "
+                   (map (fn [[k v]]
+                          (if (= :& k)
+                            (str "{..." (emit v (dissoc env :jsx)) "}")
+                            (str (name k) "=" (cond-> (emit v (assoc env :jsx false))
+                                                (not (string? v))
+                                                ;; since we escape here, we
+                                                ;; can probably remove
+                                                ;; escaping elsewhere?
+                                                (escape-jsx env)))))
+                        v)))
+        "")
+      )))

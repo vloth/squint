@@ -1,11 +1,16 @@
 ## Squint
 
-Squint is a compiler for an experimental dialect of ClojureScript. You can think
-of this as CLJS lite or CLJS--.
+Squint is a light-weight dialect of ClojureScript with a compiler and standard
+library.
 
 Squint is not intended as a full replacement for ClojureScript but as a tool to
-target JS for anything you would not use ClojureScript for, for whatever reason:
-performance, bundle size, ease of interop, etc.
+target JS when you need something more light-weight in terms of interop and
+bundle size. The most significant different with CLJS is that squint uses only
+built-in JS data structures. Squint's output is designed to work well with ES
+modules.
+
+If you want to use squint, but with the normal ClojureScript standard library
+and data structures, check out [cherry](https://github.com/squint-cljs/cherry).
 
 > :warning: This project is a work in progress and may still undergo breaking
 > changes.
@@ -187,6 +192,8 @@ To pass props, you can use `:&`:
 
 See an example of an application using JSX [here](https://squint-cljs.github.io/demos/squint/solidjs/) ([source](https://github.com/squint-cljs/squint/blob/main/examples/solid-js/src/App.cljs)).
 
+[Play with JSX non the playground](https://squint-cljs.github.io/squint/?repl=true&src=KHJlcXVpcmUgJ1sicmVhY3QiIDphcyByZWFjdF0pCihyZXF1aXJlICdbInJlYWN0LWRvbSIgOmFzIHJkb21dKQoKKGRlZm9uY2UgY29tcG9uZW50LXN0YXRlIChhdG9tIDApKQoKKGRlZm4gQmFyIFt7OmtleXMgW2ZpcnN0bmFtZSBsYXN0bmFtZV0gOmFzIHByb3BzfV0KICAobGV0IFtbY2xpY2tzIHNldENsaWNrc10gKHJlYWN0L3VzZVN0YXRlIEBjb21wb25lbnQtc3RhdGUpXQogICAgI2pzeCBbOjw%2BCiAgICAgICAgICBbOnNwYW4gZmlyc3RuYW1lICIgIiBsYXN0bmFtZV0KICAgICAgICAgIFs6ZGl2ICJZb3UgY2xpY2tlZCAiIGNsaWNrcyAiIHRpbWVzISJdCiAgICAgICAgICBbOmJ1dHRvbiB7Om9uQ2xpY2sgIyhzZXRDbGlja3MgKHN3YXAhIGNvbXBvbmVudC1zdGF0ZSBpbmMpKX0KICAgICAgICAgICAiQ2xpY2sgbWUiXV0pKQoKKGRlZm4gRm9vIFtdCiAgI2pzeCBbOmRpdiAiSGVsbG8sICIKICAgICAgICAobGV0IFttIChhc3NvYyB7OmZpcnN0bmFtZSAiTWljaGllbCJ9IDpsYXN0bmFtZSAiQm9ya2VudCIpXQogICAgICAgICAgI2pzeCBbQmFyIHs6JiBtfV0pXSkKCihkZWZvbmNlIGVsdCAoZG90byAoanMvZG9jdW1lbnQuY3JlYXRlRWxlbWVudCAiZGl2IikKICAgICAgICAgICAgICAgKGpzL2RvY3VtZW50LmJvZHkucHJlcGVuZCkpKQoKKGRlZiByb290IChyZG9tL2NyZWF0ZVJvb3QgZWx0KSkKCigucmVuZGVyIHJvb3QgI2pzeCBbRm9vXSk%3D)
+
 ## Async/await
 
 squint supports `async/await`:
@@ -283,54 +290,68 @@ A svelte pre-processor for squint can be found [here](https://github.com/jruz/sv
 
 See [examples/vite-react](examples/vite-react).
 
+## React Native (Expo)
+
+See [examples/expo-react-native](examples/expo-react-native).
+
 ## Compile on a server, use in a browser
 
-This is a small demo of how to leverage squint from a JVM to compile snippets of
-JavaScript that you can use in the browser.
+See [examples/babashka/index.clj](examples/babashka/index.clj).
 
-``` clojure
-(require '[squint.compiler])
-(-> (squint.compiler/compile-string* "(prn (map inc [1 2 3]))" {:core-alias "_sc"}) :body)
-;;=> "_sc.prn(_sc.map(_sc.inc, [1, 2, 3]));\n"
-```
+<!-- This is a small demo of how to leverage squint from a JVM to compile snippets of -->
+<!-- JavaScript that you can use in the browser. -->
 
-The `:core-alias` option takes care of prefixing any `squint.core` function with an alias, in the example `_sc`.
+<!-- ``` clojure -->
+<!-- (require '[squint.compiler]) -->
+<!-- (-> (squint.compiler/compile-string* "(prn (map inc [1 2 3]))" {:core-alias "_sc"}) :body) -->
+<!-- ;;=> "_sc.prn(_sc.map(_sc.inc, [1, 2, 3]));\n" -->
+<!-- ``` -->
 
-In HTML, to avoid any async ES6, there is also a UMD build of `squint.core`
-available. See the below HTML how it is used. We alias the core library to our
-shorter `_sc` alias ourselves using
+<!-- The `:core-alias` option takes care of prefixing any `squint.core` function with an alias, in the example `_sc`. -->
 
-``` html
-<script>globalThis._sc = squint.core;</script>
-```
+<!-- In HTML, to avoid any async ES6, there is also a UMD build of `squint.core` -->
+<!-- available. See the below HTML how it is used. We alias the core library to our -->
+<!-- shorter `_sc` alias ourselves using -->
 
-to make it all work.
+<!-- ``` html -->
+<!-- <script>globalThis._sc = squint.core;</script> -->
+<!-- ``` -->
 
-``` html
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Squint</title>
-    <script src="https://cdn.jsdelivr.net/npm/squint-cljs@0.2.30/lib/squint.core.umd.js"></script>
-    <!-- rename squint.core to a shorter alias at your convenience: -->
-    <script>globalThis._sc = squint.core;</script>
-    <!-- compile JS on the server using: (squint.compiler/compile-string* "(prn (map inc [1 2 3]))" {:core-alias "_sc"}) -->
-    <script>
-      _sc.prn(_sc.map(_sc.inc, [1, 2, 3]));
-    </script>
-  </head>
-  <body>
-    <button onClick="_sc.prn(_sc.map(_sc.inc, [1, 2, 3]));">
-      Click me
-    </button>
-  </body>
-</html>
-```
+<!-- to make it all work. -->
+
+<!-- ``` html -->
+<!-- <!DOCTYPE html> -->
+<!-- <html> -->
+<!--   <head> -->
+<!--     <title>Squint</title> -->
+<!--     <script src="https://cdn.jsdelivr.net/npm/squint-cljs@0.2.30/lib/squint.core.umd.js"></script> -->
+<!--     <\!-- rename squint.core to a shorter alias at your convenience: -\-> -->
+<!--     <script>globalThis._sc = squint.core;</script> -->
+<!--     <\!-- compile JS on the server using: (squint.compiler/compile-string* "(prn (map inc [1 2 3]))" {:core-alias "_sc"}) -\-> -->
+<!--     <script> -->
+<!--       _sc.prn(_sc.map(_sc.inc, [1, 2, 3])); -->
+<!--     </script> -->
+<!--   </head> -->
+<!--   <body> -->
+<!--     <button onClick="_sc.prn(_sc.map(_sc.inc, [1, 2, 3]));"> -->
+<!--       Click me -->
+<!--     </button> -->
+<!--   </body> -->
+<!-- </html> -->
+<!-- ``` -->
 
 ## Playground
 
-- [pinball](https://squint-cljs.github.io/squint/?src=https://gist.githubusercontent.com/borkdude/ca3af924dc2526f00361f28dcf5d0bfb/raw/09cd9e17bf0d6fa3655d0e7cbf2c878e19cb894f/pinball.cljs)
-- [wordle](https://squint-cljs.github.io/squint/?src=https://gist.githubusercontent.com/borkdude/9ed90af225a57ba6b8d9dd12e7c71eea/raw/02fd614cad0da4ac696511c438ebd9ed67d412b5/wordle.cljs)
+- [Pinball](https://squint-cljs.github.io/squint/?src=https://gist.githubusercontent.com/borkdude/ca3af924dc2526f00361f28dcf5d0bfb/raw/09cd9e17bf0d6fa3655d0e7cbf2c878e19cb894f/pinball.cljs)
+- [Wordle](https://squint-cljs.github.io/squint/?src=https://gist.githubusercontent.com/borkdude/9ed90af225a57ba6b8d9dd12e7c71eea/raw/02fd614cad0da4ac696511c438ebd9ed67d412b5/wordle.cljs)
+- [React](https://squint-cljs.github.io/squint/?repl=true&src=KHJlcXVpcmUgJ1sicmVhY3QiIDphcyByZWFjdF0pCihyZXF1aXJlICdbInJlYWN0LWRvbSIgOmFzIHJkb21dKQoKKGRlZm9uY2UgY29tcG9uZW50LXN0YXRlIChhdG9tIDApKQoKKGRlZm4gQmFyIFt7OmtleXMgW2ZpcnN0bmFtZSBsYXN0bmFtZV0gOmFzIHByb3BzfV0KICAobGV0IFtbY2xpY2tzIHNldENsaWNrc10gKHJlYWN0L3VzZVN0YXRlIEBjb21wb25lbnQtc3RhdGUpXQogICAgI2pzeCBbOjw%2BCiAgICAgICAgICBbOnNwYW4gZmlyc3RuYW1lICIgIiBsYXN0bmFtZV0KICAgICAgICAgIFs6ZGl2ICJZb3UgY2xpY2tlZCAiIGNsaWNrcyAiIHRpbWVzISJdCiAgICAgICAgICBbOmJ1dHRvbiB7Om9uQ2xpY2sgIyhzZXRDbGlja3MgKHN3YXAhIGNvbXBvbmVudC1zdGF0ZSBpbmMpKX0KICAgICAgICAgICAiQ2xpY2sgbWUiXV0pKQoKKGRlZm4gRm9vIFtdCiAgI2pzeCBbOmRpdiAiSGVsbG8sICIKICAgICAgICAobGV0IFttIChhc3NvYyB7OmZpcnN0bmFtZSAiTWljaGllbCJ9IDpsYXN0bmFtZSAiQm9ya2VudCIpXQogICAgICAgICAgI2pzeCBbQmFyIHs6JiBtfV0pXSkKCihkZWZvbmNlIGVsdCAoZG90byAoanMvZG9jdW1lbnQuY3JlYXRlRWxlbWVudCAiZGl2IikKICAgICAgICAgICAgICAgKGpzL2RvY3VtZW50LmJvZHkucHJlcGVuZCkpKQoKKGRlZiByb290IChyZG9tL2NyZWF0ZVJvb3QgZWx0KSkKCigucmVuZGVyIHJvb3QgI2pzeCBbRm9vXSk%3D), [preact](https://squint-cljs.github.io/squint/?repl=true&jsx.import-source=https%3A%2F%2Fesm.sh%2Fpreact%4010.19.2&src=KHJlcXVpcmUgJ1siaHR0cHM6Ly9lc20uc2gvcHJlYWN0QDEwLjE5LjIiIDphcyByZWFjdF0pCihyZXF1aXJlICdbImh0dHBzOi8vZXNtLnNoL3ByZWFjdEAxMC4xOS4yL2hvb2tzIiA6YXMgaG9va3NdKQoKKGRlZm9uY2UgY29tcG9uZW50LXN0YXRlIChhdG9tIDApKQoKKGRlZm4gQmFyIFt7OmtleXMgW2ZpcnN0bmFtZSBsYXN0bmFtZV0gOmFzIHByb3BzfV0KICAobGV0IFtbY2xpY2tzIHNldENsaWNrc10gKGhvb2tzL3VzZVN0YXRlIEBjb21wb25lbnQtc3RhdGUpXQogICAgI2pzeCBbOjw%2BCiAgICAgICAgICBbOnNwYW4gZmlyc3RuYW1lICIgIiBsYXN0bmFtZV0KICAgICAgICAgIFs6ZGl2ICJZb3UgY2xpY2tlZCAiIGNsaWNrcyAiIHRpbWVzISJdCiAgICAgICAgICBbOmJ1dHRvbiB7Om9uQ2xpY2sgIyhzZXRDbGlja3MgKHN3YXAhIGNvbXBvbmVudC1zdGF0ZSBpbmMpKX0KICAgICAgICAgICAiQ2xpY2sgbWUiXV0pKQoKKGRlZm4gRm9vIFtdCiAgI2pzeCBbOmRpdiAiSGVsbG8sICIKICAgICAgICAobGV0IFttIChhc3NvYyB7OmZpcnN0bmFtZSAiTWljaGllbCJ9IDpsYXN0bmFtZSAiQm9ya2VudCIpXQogICAgICAgICAgI2pzeCBbQmFyIHs6JiBtfV0pXSkKCihkZWZvbmNlIGVsdCAoZG90byAoanMvZG9jdW1lbnQuY3JlYXRlRWxlbWVudCAiZGl2IikKICAgICAgICAgICAgICAgKGpzL2RvY3VtZW50LmJvZHkucHJlcGVuZCkpKQoKKHJlYWN0L3JlbmRlciAjanN4IFtGb29dIGVsdCk%3D)
+- [TC39 Records and Tuples](https://squint-cljs.github.io/squint/?repl=true&src=KHJlcXVpcmUgJ1siaHR0cHM6Ly91bnBrZy5jb20vQGJsb29tYmVyZy9yZWNvcmQtdHVwbGUtcG9seWZpbGwiIDphcyB0YzM5XSkKCihkZWYgYSAoanMvUmVjb3JkIHs6YSAxfSkpCihkZWYgYiAoanMvUmVjb3JkIHs6YSAxfSkpCig9IGEgYikgOzsgdHJ1ZSwgdGhhbmsgZ29kCihkZWYgc3RvcmUgKG5ldyBqcy9NYXApKQooLnNldCBzdG9yZSBhICJrZXllZCBieSBjb2xsZWN0aW9uIGEiKQo7OyBhbHRob3VnaCB3ZSBnZXQgdGhlIHZhbHVlIGZyb20gdGhlIG1hcCB1c2luZyBiLCB3ZSBnZXQgdGhlIHNhbWUgdmFsdWUgb3V0IGFzIGEKKC5nZXQgc3RvcmUgYikgOzs9PiAia2V5ZWQgYnkgY29sbGVjdGlvbiBhIgooZGVmIHQxIChqcy9UdXBsZSAxIDIpKQooZGVmIHQyIChqcy9UdXBsZSAxIDIpKQooZGVmIG15LW1hcCAobmV3IGpzL01hcCBbW3QxIDpoZWxsb10gW3QyIDp0aGVyZV1dKSkKKGdldCBteS1tYXAgdDEpIDs7PT4gdGhlcmUKKGNvbnRhaW5zPyAje3QxfSB0MikgOzsgdHJ1ZQooY291bnQgI3t0MSB0Mn0pIDs7IDEgOzsgdGhhbmsgZ29k)
+- [edn-data](https://squint-cljs.github.io/squint/?repl=true&src=KHJlcXVpcmUgJ1siaHR0cHM6Ly9lc20uc2gvZWRuLWRhdGFAMS4xLjEvZGlzdC9pbmRleC5qcyIgOmFzIGVkbl0pCgooZWRuL3BhcnNlRUROU3RyaW5nICJ7OmEgMSA6YiAjezpmb28gOmJhciA6YmF6fSA6YyAjaW5zdCBcIjIwMDBcIn0iCiAgezptYXBBcyA6b2JqZWN0IDprZXl3b3JkQXMgOnN0cmluZyA6c2V0QXMgOnNldH0pCgooZWRuL3BhcnNlRUROU3RyaW5nIChlZG4vdG9FRE5TdHJpbmdGcm9tU2ltcGxlT2JqZWN0IHs6YSAxIDpiIDIgOmMgI3s6YSA6YiA6Y319KQogIHs6bWFwQXMgOm9iamVjdCA6a2V5d29yZEFzIDpzdHJpbmcgOnNldEFzIDpzZXR9KQ%3D%3D)
+- [Immutable-js](https://squint-cljs.github.io/squint/?repl=true&src=KHJlcXVpcmUKICAnWyJodHRwczovL3d3dy51bnBrZy5jb20vaW1tdXRhYmxlQDQuMy40L2Rpc3QvaW1tdXRhYmxlLmVzLmpzIgogICAgOmFzIGkKICAgIDpyZWZlciBbU2V0IExpc3RdXSkKCihzdHIgKFNldC9vZgogICAgICAgKExpc3Qvb2YgMSwyLDMpCiAgICAgICAoTGlzdC9vZiAxLDIsMykpKQ%3D%3D)
+- [Loading a UMD module](https://squint-cljs.github.io/squint/?repl=true&src=KGRlZm4gXjphc3luYyBqcy1yZXF1aXJlIFt1cmwgbW9kdWxlXQogIChsZXQgW21vZHVsZSAob3IgbW9kdWxlIHs6ZXhwb3J0cyB7fX0pCiAgICAgICAgcmVzcCAoanMtYXdhaXQgKGpzL2ZldGNoIHVybCkpCiAgICAgICAgc2NyaXB0IChqcy1hd2FpdCAoLnRleHQgcmVzcCkpCiAgICAgICAgZnVuYyAoanMvRnVuY3Rpb24gIm1vZHVsZSIgImV4cG9ydHMiIHNjcmlwdCldCiAgICAoLmNhbGwgZnVuYyBtb2R1bGUgbW9kdWxlICguLWV4cG9ydHMgbW9kdWxlKSkKICAgICguLWV4cG9ydHMgbW9kdWxlKSkpCgooZGVmIGVxdWFsIChqcy1hd2FpdCAoanMtcmVxdWlyZSAiaHR0cHM6Ly91bnBrZy5jb20vZmFzdC1kZWVwLWVxdWFsQDMuMS4zL2luZGV4LmpzIikpKQoKKGVxdWFsIFsxIDIgM10gWzEgMiAzXSk%3D)
+- [Vega-lite](https://squint-cljs.github.io/squint/?repl=true&src=KGRlZm4gXjphc3luYyBldmFsLXNjcmlwdCBbdXJsXQogIChsZXQgW3Jlc3AgKGpzLWF3YWl0IChqcy9mZXRjaCB1cmwpKQogICAgICAgIHNjcmlwdCAoanMtYXdhaXQgKC50ZXh0IHJlc3ApKV0KICAgIChqcy9ldmFsIHNjcmlwdCkpKQoKKGpzLWF3YWl0IChldmFsLXNjcmlwdCAiaHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L25wbS92ZWdhQDUiKSkKKGpzLWF3YWl0IChldmFsLXNjcmlwdCAiaHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L25wbS92ZWdhLWxpdGVANCIpKQooanMtYXdhaXQgKGV2YWwtc2NyaXB0ICJodHRwczovL2Nkbi5qc2RlbGl2ci5uZXQvbnBtL3ZlZ2EtZW1iZWRANiIpKQoKKGRlZm9uY2UgY3JlYXRlLWRpdgogIChkbwogICAgKGpzL2RvY3VtZW50LmJvZHkucHJlcGVuZCAoZG90byAoanMvZG9jdW1lbnQuY3JlYXRlRWxlbWVudCAiZGl2IikKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAoc2V0ISAtaWQgInZpcyIpKSkKICAgIHRydWUpKQoKKGRlZiBzcGVjIHs6JHNjaGVtYSAiaHR0cHM6Ly92ZWdhLmdpdGh1Yi5pby9zY2hlbWEvdmVnYS1saXRlL3Y0LjAuanNvbiIKICAgICAgICAgICA6ZGVzY3JpcHRpb24gIkEgc2ltcGxlIGJhciBjaGFydCB3aXRoIGVtYmVkZGVkIGRhdGEuIgogICAgICAgICAgIDpkYXRhIHs6dmFsdWVzIFt7OmEgIkEiLDpiIDI4fSx7OmEgIkIiLDpiIDU1fSx7OmEgIkMiLDpiIDQzfQogICAgICAgICAgICAgICAgICAgICAgICAgICB7OmEgIkQiLDpiIDkxfSx7OmEgIkUiLDpiIDgxfSx7OmEgIkYiLDpiIDUzfQogICAgICAgICAgICAgICAgICAgICAgICAgICB7OmEgIkciLDpiIDE5fSx7OmEgIkgiLDpiIDg3fSx7OmEgIkkiLDpiIDUyfV19CiAgICAgICAgICAgOm1hcmsgOmJhcgogICAgICAgICAgIDplbmNvZGluZyB7OnggeyJmaWVsZCIgImEiLCJ0eXBlIiAib3JkaW5hbCJ9CiAgICAgICAgICAgICAgICAgICAgICA6eSB7ImZpZWxkIiAiYiIsInR5cGUiICJxdWFudGl0YXRpdmUifX19KQoKKGpzL3ZlZ2FFbWJlZCAiI3ZpcyIgc3BlYyk%3D)
+- [Three-js](https://squint-cljs.github.io/squint/examples/threejs/playground.html?repl=true)
+- [Vue.js](https://squint-cljs.github.io/squint/?repl=true&src=KHJlcXVpcmUgJ1siaHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L25wbS92dWVAMy4zLjEwL2Rpc3QvdnVlLmVzbS1icm93c2VyLmpzIiA6YXMgdnVlXSkKKGRlZm9uY2UgZWx0CiAgKGRvdG8gKGpzL2RvY3VtZW50LmNyZWF0ZUVsZW1lbnQgImRpdiIpCiAgICAoanMvZG9jdW1lbnQuYm9keS5wcmVwZW5kKQogICAgKHNldCEgLWlubmVySFRNTCAiPGRpdiBpZD1cImFwcFwiPgogIDxidXR0b24gQGNsaWNrPVwiY291bnQrK1wiPgogICAgQ291bnQgaXM6IHt7IGNvdW50IH19CiAgPC9idXR0b24%2BCjwvZGl2PiIpKSkKCihkZWYgYXBwICh2dWUvY3JlYXRlQXBwCiAgICAgICAgICAgezpzZXR1cCAoZm4gW10KICAgICAgICAgICAgICAgICAgICAgezpjb3VudCAodnVlL3JlZiAwKX0pfSkpCgooLm1vdW50IGFwcCAiI2FwcCIp)
 
 License
 =======

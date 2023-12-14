@@ -7,7 +7,9 @@
    [squint.string-test]
    [squint.test-utils :refer [eq js! jss! jsv!]]
    ["fs" :as fs]
-   ["child_process" :as process]))
+   ["child_process" :as process]
+   ["node:util" :as util]
+   [promesa.core :as p]))
 
 (deftest return-test
   (is (str/includes? (jss! '(do (def x (do 1 2 nil))))
@@ -98,9 +100,27 @@
     (is (= 1 ((js/eval s) 1))))
   (is (= 1 (jsv! '(do (defn foo [] (fn [x] x)) ((foo) 1))))))
 
+(deftest jss!-test
+  (is (not (str/includes? (jss! '(def x 1) {:repl false}) "globalThis")))
+  (is (str/includes? (jss! '(def x 1) {:repl true}) "globalThis")))
+
 (deftest fn-varargs-test
-  (is (eq #js [3 4] (jsv! '(let [f (fn foo [x y & zs] zs)] (f 1 2 3 4)))))
-  (is (nil? (jsv! '(let [f (fn foo [x y & zs] zs)] (f 1 2))))))
+  (doseq [repl [true false]]
+    (testing "vararg fixed arity"
+      (is (nil? (jsv! '(let [f (fn foo [x y & zs] zs)] (f 1 2)) {:repl repl}))))
+    (testing "vararg vararg arity"
+      (is (eq #js [3 4] (jsv! '(let [f (fn foo [x y & zs] zs)] (f 1 2 3 4)) {:repl repl}))))
+    (testing "multi vararg fixed arity"
+      (is (eq 1 (jsv! '(let [f (fn foo
+                                 ([y] 1)
+                                 ([y & zs] zs))]
+                         (f 1))
+                      {:repl repl}))))
+    (testing "multi vararg vararg arity"
+      (is (eq [2] (jsv! '(let [f (fn foo
+                                   ([y] 1)
+                                   ([y & zs] zs))]
+                           (f 1 2)) {:repl repl}))))))
 
 (deftest fn-multi-arity-test
   (is (= 1 (jsv! '(let [f (fn foo ([x] x) ([x y] y))] (f 1)))))
@@ -178,6 +198,23 @@
                    x)")]
     (is (= 3 (js/eval s))))
   (is (eq #js {:a 1} (jsv! "{:a (or 1 (cond true (prn :yes)) 2)}"))))
+
+(deftest zero?-test
+  (is (str/includes? (jss! "(if (zero? x) 1 2)") "== 0"))
+  (is (not (str/includes? (jss! "(if (zero? x) 1 2)") "truth_"))))
+
+(deftest no-truth-check-test
+  (let [inputs ["(if (zero? 0) 1 2)" "(when (< 1 2) 1)" "(when (= 1 1) 1)"
+                "(let [x (zero? 0)] (when x 1))"
+                "(if (neg? 1) 0 1)" "(if (not 1) 0 1)"
+                "(if \"foo\" 1 2)" "(if :foo 1 2)"
+                "(let [x nil] (if (nil? x) 1 2))"
+                "(let [x (zero? 0) y x] (if y 1 2))"
+                "(if (coercive-boolean (range 0 1)) 1 2)"]]
+    (doseq [input inputs]
+      (let [js (jss! input)]
+        (is (not (str/includes? js "truth_")) (str "contains truth check: " input "\n" js))
+        (is (eq 1 (js/eval js)))))))
 
 (deftest doseq-test
   (let [s (jss! '(let [a []]
@@ -282,30 +319,30 @@
                             y [4 5 6]
                             :when (< (+ x y) 8)]
                         [x y])))]
-     (is (eq [[1 4] [1 5] [1 6] [2 4] [2 5] [3 4]]
-             (js/eval s))))
+    (is (eq [[1 4] [1 5] [1 6] [2 4] [2 5] [3 4]]
+            (js/eval s))))
   (let [s (jss! '(vec (for [x (range 3) y (range 3) :while (not= x y)]
                         [x y])))]
-     (is (eq [[1 0] [2 0] [2 1]]
-             (js/eval s))))
+    (is (eq [[1 0] [2 0] [2 1]]
+            (js/eval s))))
   ;; https://clojuredocs.org/clojure.core/for#example-542692d3c026201cdc326fa9
   (testing ":while placement"
     (let [s (jss! '(vec
-                     (for [x [1 2 3]
-                             y [1 2 3]
-                             :while (<= x y)
-                             z [1 2 3]]
-                       [x y z])))]
+                    (for [x [1 2 3]
+                          y [1 2 3]
+                          :while (<= x y)
+                          z [1 2 3]]
+                      [x y z])))]
       (is (eq [[1 1 1] [1 1 2] [1 1 3]
                [1 2 1] [1 2 2] [1 2 3]
                [1 3 1] [1 3 2] [1 3 3]]
               (js/eval s))))
     (let [s (jss! '(vec
-                     (for [x [1 2 3]
-                             y [1 2 3]
-                             z [1 2 3]
-                             :while (<= x y)]
-                       [x y z])))]
+                    (for [x [1 2 3]
+                          y [1 2 3]
+                          z [1 2 3]
+                          :while (<= x y)]
+                      [x y z])))]
       (is (eq [[1 1 1] [1 1 2] [1 1 3]
                [1 2 1] [1 2 2] [1 2 3]
                [1 3 1] [1 3 2] [1 3 3]
@@ -345,6 +382,15 @@
                   {:repl true})]
       (is (str/includes? s "globalThis"))
       (is (eq [1 2 3] (js/eval s))))))
+
+(deftest Math-test
+  (let [expr '(Math/sqrt 3.14)]
+    (is (eq (Math/sqrt 3.14) (jsv! (str expr))))
+    (testing "repl-mode"
+      (let [s (jss! (str expr) {:repl true})]
+        (is (str/includes? s "globalThis.user"))
+        (is (not (str/includes? s "globalThis.user.Math")))
+        (is (eq (Math/sqrt 3.14) (js/eval s)))))))
 
 (deftest regex-test
   (is (eq '("foo")
@@ -459,42 +505,42 @@
 
 (deftest await-test
   (async done
-         (->
-          (.then (jsv! '(do (defn ^:async foo []
-                              (js/await (js/Promise.resolve :hello)))
+    (->
+     (.then (jsv! '(do (defn ^:async foo []
+                         (js/await (js/Promise.resolve :hello)))
 
-                            (defn ^:async bar []
-                              (let [x (js/await (foo))]
-                                x))
+                       (defn ^:async bar []
+                         (let [x (js/await (foo))]
+                           x))
 
-                            (bar)))
-                 (fn [v]
-                   (is (= "hello" v))))
-          (.catch (fn [err]
-                    (is false (.-message err))))
-          (.finally #(done)))))
+                       (bar)))
+            (fn [v]
+              (is (= "hello" v))))
+     (.catch (fn [err]
+               (is false (.-message err))))
+     (.finally #(done)))))
 
 (deftest top-level-await-test
   (is (str/includes? (jss! "(js-await 1)") "await")))
 
 (deftest await-variadic-test
   (async done
-         (->
-          (.then (jsv! '(do (defn ^:async foo [& xs] (js/await 10))
-                            (defn ^:async bar [x & xs] (js/await 20))
-                            (defn ^:async baz
-                              ([x] (baz x 1 2 3))
-                              ([x & xs]
-                               (let [x (js/await (foo x))
-                                     y (js/await (apply bar xs))]
-                                 (+ x y))))
+    (->
+     (.then (jsv! '(do (defn ^:async foo [& xs] (js/await 10))
+                       (defn ^:async bar [x & xs] (js/await 20))
+                       (defn ^:async baz
+                         ([x] (baz x 1 2 3))
+                         ([x & xs]
+                          (let [x (js/await (foo x))
+                                y (js/await (apply bar xs))]
+                            (+ x y))))
 
-                            (baz 1)))
-                 (fn [v]
-                   (is (= 30 v))))
-          (.catch (fn [err]
-                    (is false (.-message err))))
-          (.finally #(done)))))
+                       (baz 1)))
+            (fn [v]
+              (is (= 30 v))))
+     (.catch (fn [err]
+               (is false (.-message err))))
+     (.finally #(done)))))
 
 (deftest native-js-array-test
   (let [s (jss! "(let [x 2
@@ -549,7 +595,7 @@
     (is (= true, (jsv! '(vector? (conj)))))
     (is (eq '(), (jsv! '(conj nil))))
     (is (= true, (jsv! '(array? (conj nil)))))
-    (is (eq [1 2] (jsv! '(conj nil 1 2)))))
+    (is (eq [2 1] (jsv! '(conj nil 1 2)))))
   (testing "arrays"
     (is (eq [1 2 3 4] (jsv! '(conj [1 2 3 4]))))
     (is (eq [1 2 3 4] (jsv! '(conj [1 2 3] 4))))
@@ -844,7 +890,7 @@
 
 (deftest reduce-test
   (testing "no val"
-    (is (= 10 (jsv! '(reduce #(+ %1 %2) (range 5)))))
+    (is (= 10 (jsv! '(reduce + (range 5)))))
     (is (= 3 (jsv! '(reduce #(if (< %2 3)
                                (+ %1 %2)
                                (reduced %1))
@@ -893,12 +939,107 @@
                              (js/Object.values {:a 1 :b 2 :c 3 :d 4})))))
     (is (= 10 (jsv! '(reduce #(+ %1 (second %2))
                              0
-                             {:a 1 :b 2 :c 3 :d 4}))))))
-
+                             {:a 1 :b 2 :c 3 :d 4})))))
+  (testing "empty coll"
+    (is (= 0 (jsv! '(reduce + []))))))
 
 (deftest reduced-test
   (is (jsv! '(reduced? (reduced 5))))
   (is (= 4 (jsv! '(deref (reduced 4))))))
+
+(deftest reductions-test
+  (testing "lazy"
+    (is (eq (vec (take 10 (reductions + (range))))
+            (jsv! `(vec (take 10 (reductions + (range))))))
+        "Returns a lazy sequence"))
+  (testing "no val"
+    (is (eq (vec (reductions + [1 1 1 1])) (jsv! '(vec (reductions + [1 1 1 1])))))
+    (is (eq (vec (reductions #(if (< %2 3)
+                                (+ %1 %2)
+                                (reduced %1))
+                             (range 5)))
+            (jsv! '(vec (reductions #(if (< %2 3)
+                                       (+ %1 %2)
+                                       (reduced %1))
+                                    (range 5)))))
+        "reduced early")
+    (is (eq (reduce #(if (< %2 4)
+                       (+ %1 %2)
+                       (reduced %1))
+                    (range 5))
+            (jsv! '(reduce #(if (< %2 4)
+                              (+ %1 %2)
+                              (reduced %1))
+                           (range 5))))
+        "reduced last el")
+    (is (eq (vec (reductions (fn [x _] (reduced x))
+                             (range 5)))
+            (jsv! '(vec (reductions (fn [x _] (reduced x))
+                                    (range 5)))))
+        "reduced first el"))
+  (testing "val"
+    (is (eq (vec (reductions conj [] '(1 2 3)))
+            (jsv! '(vec (reductions conj [] '(1 2 3)))))))
+  (testing "sets"
+    (is (eq (vec (reductions #(+ %1 %2) #{1 2 3 4}))
+            (jsv! '(vec (reductions #(+ %1 %2) #{1 2 3 4}))))))
+  (testing "maps"
+    (is (eq (vec (reductions #(+ %1 (second %2))
+                             0
+                             {:a 1, :b 2, :c 3, :d 4}))
+            (jsv! '(vec (reductions #(+ %1 (second %2))
+                                    0
+                                    (js/Map. [[:a 1] [:b 2] [:c 3] [:d 4]])))))))
+  (testing "objects"
+    (is (eq (vec (reductions #(+ %1 (second %2))
+                             0
+                             {:a 1, :b 2, :c 3, :d 4}))
+            (jsv! '(vec (reductions #(+ %1 (second %2))
+                                    0
+                                    (js/Object.entries {:a 1, :b 2, :c 3, :d 4}))))))
+    (is (eq (vec (reductions #(+ %1 %2)
+                             0
+                             (vals {:a 1 :b 2 :c 3 :d 4})))
+            (jsv! '(vec (reductions #(+ %1 %2)
+                                    0
+                                    (js/Object.values {:a 1 :b 2 :c 3 :d 4}))))))
+    (is (eq (vec (reductions #(+ %1 (second %2))
+                             0
+                             {:a 1, :b 2, :c 3, :d 4}))
+            (jsv! '(vec (reductions #(+ %1 (second %2))
+                                    0
+                                    {:a 1 :b 2 :c 3 :d 4}))))))
+  (testing "empty coll"
+    (is (eq (vec (reductions + '())) (jsv! '(vec (reductions + '())))))
+    (is (eq (vec (reductions + [])) (jsv! '(vec (reductions + []))))))
+  (testing "composability"
+    ;; https://clojuredocs.org/clojure.core/reductions#example-58bdd686e4b01f4add58fe6b
+    (is (eq (vec (take 3 (as-> (repeat {:height 50}) posts
+                           (map #(assoc %1 :offset %2)
+                                posts
+                                (reductions + 0 (map :height posts))))))
+            (jsv! '(vec (take 3 (as-> (repeat {:height 50}) posts
+                                  (map #(assoc %1 :offset %2)
+                                       posts
+                                       (reductions + 0 (map :height posts))))))))))
+  (testing "lazy-reusage"
+    (is (= 100 (jsv! '(do (def a (atom []))
+                          (defn spy [x] (swap! a conj x) x)
+                          (vec (reductions + (map spy (range 100))))
+                          (count @a)))))
+    (is (eq (do
+              (let [ xs (reductions + (range 3))]
+                [(count xs) (count xs)]))
+            (jsv! '(do
+                     (let [ xs (reductions + (range 3))]
+                       [(count xs) (count xs)])))))
+    (is (eq 10
+            (jsv! '(do (let [a (atom [])
+                             spy (fn [x] (swap! a conj x) x)]
+                         (doall (take 10 (reductions + (map spy (range)))))
+                         (count @a)))))))
+  (testing "stack consumptions"
+    (is (= 49995000 (jsv! '(last (reductions + (range 10000))))))))
 
 (deftest seq-test
   (is (= "abc" (jsv! '(seq "abc"))))
@@ -1069,7 +1210,10 @@
   (testing "accepts a single, numeric element in the list"
     (is (eq '(23) (jsv! '(list 23)))))
   (testing "creates an empty list"
-    (is (eq '() (jsv! '(list))))))
+    (is (eq '() (jsv! '(list))))
+    (is (eq '() (jsv! "()")))
+    (is (eq '() (jsv! "'()")))
+    (is (eq '(1 2 3) (jsv! "'(1 2 3)")))))
 
 (deftest instance-test
   (is (true? (jsv! '(instance? js/Array []))))
@@ -1080,7 +1224,9 @@
   (is (eq [] (jsv! '(vec (concat nil)))))
   (is (eq [1] (jsv! '(vec (concat nil [] [1])))))
   (is (eq [0 1 2 3 4 5 6 7 8 9] (jsv! '(vec (concat [0 1 2 3] [4 5 6] [7 8 9])))))
-  (is (eq [["a" "b"] ["c" "d"] 2] (jsv! '(vec (concat {"a" "b" "c" "d"} [2]))))))
+  (is (eq [["a" "b"] ["c" "d"] 2] (jsv! '(vec (concat {"a" "b" "c" "d"} [2])))))
+  (testing "apply infinite seq to concat"
+    (is (eq [1 2 3 1 2 3 1 2 3 1] (jsv! '(vec (take 10 (apply concat (repeat [1 2 3])))))))))
 
 (deftest mapcat-test
   (is (eq [] (jsv! '(vec (mapcat identity nil)))))
@@ -1088,6 +1234,20 @@
   (is (eq ["a" "b" "c" "d"] (jsv! '(vec (mapcat identity {"a" "b" "c" "d"})))))
   (testing "multiple colls"
     (is (eq ["a" 1 "b" 2] (jsv! '(vec (mapcat list [:a :b :c] [1 2])))))))
+
+(deftest laziness-test
+  (is (eq ["right" "up" "left" "left" "down" "down" "right" "right" "right" "up" "up" "up" "left" "left" "left" "left" "down" "down" "down" "down"]
+          (jsv! '(do (def directions
+                       "Infite seq of directions through
+                        spiral: :right :up :left :left :down, etc."
+                       (let [dirs (cycle [[:right :up] [:left :down]])
+                             amount (map inc (range))]
+                         (mapcat (fn [[d1 d2] amount]
+                                   (concat (repeat amount d1)
+                                           (repeat amount d2)))
+                                 dirs
+                                 amount)))
+                     (vec (take 20 directions)))))))
 
 (deftest interleave-test
   (is (eq [] (jsv! '(vec (interleave nil nil)))))
@@ -1191,8 +1351,12 @@
     (is (eq (js/Map. #js [#js [1 2] #js [3 4] #js [5 6]])
             (jsv! '(into (js/Map. [[1 2]]) [[3 4] [5 6]])))))
   (testing "other types"
-    (is (thrown? js/Error (jsv! '(into "foo" []))))))
-
+    (is (thrown? js/Error (jsv! '(into "foo" [])))))
+  (testing "xform"
+    (is (eq (into [] (map inc) [1 2 3])
+            (jsv! '(into [] (map inc) [1 2 3]))))
+    (is (eq (new js/Set (into #{} (map inc) [1 2 3]))
+            (jsv! '(into #{} (map inc) [1 2 3]))))))
 
 (deftest iterable-protocol
   (is (eq [true true [1 2 3 4 5]]
@@ -1314,13 +1478,19 @@
           (vec (jsv! '(keep #(when (odd? %) (inc %)) [1 2 3]))))))
 
 (deftest reverse-test
+  (is (eq (reverse nil) (jsv! '(reverse nil))))
   (is (eq (reverse [1 2 3]) (jsv! '(reverse [1 2 3]))))
-  (is (eq (reverse (range 10)) (jsv! '(reverse (range 10))))))
+  (is (eq (reverse (range 10)) (jsv! '(reverse (range 10)))))
+  (is (eq (let [x [1 2 3]]
+            [x (reverse x)]) (jsv! '(let [x [1 2 3]]
+                                      [x (reverse x)])))))
 
 (deftest sort-test
   (is (eq (sort [3 10]) (jsv! '(sort [3 10]))))
   (is (eq (sort [4 2 3 1]) (jsv! '(sort [4 2 3 1]))))
-  (is (eq (sort - [4 2 3 1]) (jsv! '(sort - [4 2 3 1])))))
+  (is (eq (sort - [4 2 3 1]) (jsv! '(sort - [4 2 3 1]))))
+  (is (eq (sort nil) (jsv! '(sort nil))))
+  (is (eq (sort "zoob") (jsv! '(sort "zoob")))))
 
 (deftest sort-by-test
   (is (eq (sort-by count ["aaa" "bb" "c"]) (jsv! '(sort-by count ["aaa" "bb" "c"]))))
@@ -1361,7 +1531,11 @@
 (deftest group-by-test
   (is (eq [1 3] (jsv! '(get (group-by odd? [1 2 3 4]) true))))
   (is (eq [2 4] (jsv! '(get (group-by odd? [1 2 3 4]) false))))
-  (is (eq [[1 [1 2 3]]] (jsv! '(get (group-by second [[1 [1 2 3]] [2 [3 4 5]]]) [1 2 3])))))
+  (is (eq [[1 [1 2 3]]] (jsv! '(get (group-by second [[1 [1 2 3]] [2 [3 4 5]]]) [1 2 3]))))
+  (is (eq #js [#js {:weight 1000, :name "John"} #js {:weight 1000, :name "Jim"}]
+          (jsv! '(get (group-by
+                       :weight
+                       [{:weight 1000 :name :John} {:weight 1000 :name :Jim} {:weight 999 :name :Mary}]) 1000)))))
 
 (deftest frequencies-test
   (is (eq 3 (jsv! '(get (frequencies [:a :a :b :b :b]) :b)))))
@@ -1382,6 +1556,11 @@
   (is (eq [[1] [2 3]] (jsv! '(mapv vec (split-at 1 [1 2 3])))))
   (is (eq [[] []] (jsv! '(mapv vec (split-at 1 nil)))))
   (is (eq [[] [1 2 3]] (jsv! '(mapv vec (split-at 0 [1 2 3]))))))
+
+(deftest map-literal-test
+  (is (eq {} (jsv! '{})))
+  (is (eq {"1" true} (jsv! '(do (def x 1) {x true}))))
+  (is (eq {"0,1" true} (jsv! '{[0 1] true}))))
 
 (deftest split-with-test
   (is (eq [[1] [2 3]] (jsv! '(mapv vec (split-with odd? [1 2 3])))))
@@ -1419,7 +1598,14 @@
   (is (str/includes? (compiler/compile-string (pr-str '(ns foo (:require ["./popup.css" ]))))
                      "import './popup.css'"))
   (is (re-find #"import.*'./popup.css'"
-               (compiler/compile-string (pr-str '(ns foo (:require ["./popup.css" :as pop])))))))
+               (compiler/compile-string (pr-str '(ns foo (:require ["./popup.css" :as pop]))))))
+  (t/async done
+    (let [js (compiler/compile-string "(ns foo (:require [clojure.string :as str])) (str 1 2 3 (str/join \",\" [1 2 3]))" {:repl true
+                                                                                                                           :context :return})]
+      (-> (.then (js/eval (str/replace "(async function () {\n%s\n})()" "%s" js))
+                 (fn [v]
+                   (is (= "1231,2,3" v))))
+          (.finally done)))))
 
 (deftest letfn-test
   (is (= 3 (jsv! '(letfn [(f [x] (g x)) (g [x] (inc x))] (f 2)))))
@@ -1463,8 +1649,8 @@
                                x))))
   (is (eq #js {} (jsv! '(dissoc! {}))))
   (is (eq #js {} (jsv! '(let [x {"1" 2 "3" 4}]
-                               (dissoc! x "1" "3")
-                               x)))))
+                          (dissoc! x "1" "3")
+                          x)))))
 
 (deftest dissoc-test
   (is (eq #js {"1" 2 "3" 4} (jsv! '(dissoc {"1" 2 "3" 4}))))
@@ -1505,7 +1691,8 @@
             (js->clj (jsv! "(def a (atom [])) (defn log [x] (swap! a conj x) x)  (def x (lazy-seq (cons (doto 1 log) (lazy-seq (cons (doto 2 log) (vec (map inc [2 3 4]))))))) (vec x) (vec x) [@a (vec x)]"))))))
 
 (deftest keep-indexed-test
-  (is (eq #js [12 14 16 18 20] (jsv! "(keep-indexed (fn [i e] (when (odd? i) (inc e))) (range 10 20))"))))
+  (is (eq #js [12 14 16 18 20] (jsv! "(keep-indexed (fn [i e] (when (odd? i) (inc e))) (range 10 20))")))
+  (is (eq #js [12 14 16 18 20] (jsv! "(into [] (keep-indexed (fn [i e] (when (odd? i) (inc e)))) (range 10 20))"))))
 
 (deftest into-array-test
   (is (eq (clj->js [[1 2 3] [1 2 3]]) (jsv! "[(into-array [1 2 3]) (into-array String [1 2 3])]"))))
@@ -1522,8 +1709,9 @@
 (deftest re-seq-test
   (is (eq #js ["foo" "foo" "foo"] (jsv! "(vec (re-seq #\"foo\" \"foobfoobfoo\"))"))))
 
-(deftest bit-and-or
-  (is (= 3 (jsv! "(+ (bit-and 1 2 3) (bit-or 1 2 3))"))))
+(deftest bit-tests
+  (is (= 3 (jsv! "(+ (bit-and 1 2 3) (bit-or 1 2 3))")))
+  (is (= 64 (jsv! "(bit-shift-left 8 3)"))))
 
 (deftest alias-conflict-test
   (let [expr (fs/readFileSync "test-resources/alias_conflict_test.cljs" "UTF-8")
@@ -1613,7 +1801,7 @@
     (is (eq ["foo" "bar"] (vec (jsv! '(keep #{:foo :bar} [:foo :bar :baz])))))))
 
 (deftest core-var-conflict-with-local-test
-  (is (true? (jsv! '(let [t 1] (clojure.core/t 1))))))
+  (is (true? (jsv! '(let [truth_ 1] (clojure.core/truth_ 1))))))
 
 (deftest condp-test
   (is (eq 3 (jsv! '(condp some [1 2 3 4]
@@ -1621,11 +1809,326 @@
                      #{4 5 9} :>> dec
                      #{1 2 3} :>> #(+ % 3))))))
 
+(deftest nil?-test
+  (let [js (jss! "(nil? 1)")]
+    (is (str/includes? js "== null"))
+    (is (false? (js/eval js)))))
+
 (deftest re-find-test
   (is (eq nil (jsv! '(re-find #"foo." "dude"))))
   (is (eq "foox" (jsv! '(re-find #"foo." "xfooxbar"))))
   (is (eq (re-find #"(\D+)|(\d+)" "word then number 57")
           (vec (jsv! '(re-find #"(\D+)|(\d+)" "word then number 57"))))))
+
+(deftest re-pattern-test
+  (is (eq #"\d+" (jsv! '(re-pattern "\\d+"))))
+  (is (eq "dgimsuy" (jsv! '(.-flags (re-pattern "(?dgimsuy)foo")))))
+  (is (eq "dgi" (jsv! '(.-flags (re-pattern "(?dgi)foo")))))
+  (is (eq "foo" (jsv! '(.-source (re-pattern "(?dgi)foo"))))))
+
+(deftest js-in-test
+  (is (true? (jsv! "(js-in :foo {:foo 1})"))))
+
+(deftest int-test
+  (is (= 3 (jsv! "(int 3.14)"))))
+
+(deftest math-hof-test
+  (is (= 6 (jsv! "(apply * [1 2 3])")))
+  (is (true? (jsv! "(apply < [1 2 3])")))
+  (is (true? (jsv! "(apply <= [1 1 2 3])")))
+  (is (true? (jsv! "(apply > (reverse [1 2 3]))")))
+  (is (true? (jsv! "(apply >= (reverse [1 1 2 3]))"))))
+
+(deftest zipmap-test
+  (is (eq #js {} (jsv! "(zipmap nil [1 2 3])")))
+  (is (eq #js {} (jsv! "(zipmap [1 2 3] nil)")))
+  (is (eq #js {"0" 1, "1" 2, "2" 3} (jsv! "(zipmap (range) [1 2 3])")))
+  (is (eq #js {"1" 0, "2" 1, "3" 2} (jsv! "(zipmap [1 2 3] (range))"))))
+
+(deftest not-empty-test
+  (is (nil? (jsv! "(not-empty \"\")")))
+  (is (nil? (jsv! "(not-empty {})")))
+  (is (= "foo" (jsv! "(not-empty \"foo\")")))
+  (is (eq {:a 1} (jsv! "(not-empty {:a 1})"))))
+
+(deftest not-test
+  (is (false? (jsv! "(not 0)")))
+  (is (false? (jsv! "(not \"\")")))
+  (is (not (str/includes? (jss! "(not (zero? 1))") "not"))))
+
+(deftest reduce-kv-test
+  (is (eq {1 :a, 2 :b, 3 :c} (jsv! "(reduce-kv #(assoc %1 %3 %2) {} {:a 1 :b 2 :c 3})")))
+  (is (eq {1 :a, 2 :b, 3 :c} (jsv! "(reduce-kv #(assoc %1 %3 %2) {} (new js/Map (js/Object.entries {:a 1 :b 2 :c 3})))")))
+  (is (eq {:a 1} (jsv! "(reduce-kv #(assoc %1 %3 %2) {:a 1} {})"))))
+
+(defn wrap-async [s]
+  (str/replace "(async function () {\n%s\n})()" "%s" s))
+
+(deftest set-lib--test
+  (t/async done
+    (->
+     (p/do
+       (testing "intersection"
+         (let [set (fn [& xs] (new js/Set xs))
+               js (compiler/compile-string "(ns foo (:require [clojure.set :as set]))
+             [(set/intersection #{:a :b})
+              (set/intersection #{:a :b} #{:b :c})]" {:repl true
+                                                      :context :return})]
+           (p/let [vs (js/eval (wrap-async js))]
+             (let [expected [(set "a" "b") (set "b")]
+                   pairs (map vector expected vs)]
+               (doseq [[expected s] pairs]
+                 (is (eq expected s)))))))
+       (testing "difference"
+         (let [set (fn [& xs] (new js/Set xs))
+               js (compiler/compile-string "(ns foo (:require [clojure.set :as set]))
+                 [(set/difference)
+                  (set/difference #{:a :b})
+                  (set/difference #{:a :b} #{:b :c})]" {:repl true
+                                                        :context :return})]
+           (p/let [vs (js/eval (wrap-async js))]
+             (let [expected [nil
+                             (set "a" "b")
+                             (set "a")]
+                   pairs (map vector expected vs)]
+               (doseq [[expected s] pairs]
+                 (is (eq expected s)))))))
+       (testing "union"
+         (let [set (fn [& xs] (new js/Set xs))
+               js (compiler/compile-string "(ns foo (:require [clojure.set :as set]))
+                   [(set/union)
+                    (set/union #{:a :b})
+                    (set/union #{:a :b} #{:b :c})]" {:repl true
+                                                     :context :return})]
+           (p/let [vs (js/eval (wrap-async js))]
+             (let [expected [nil
+                             (set "a" "b")
+                             (set "a" "b" "c")]
+                   pairs (map vector expected vs)]
+               (doseq [[expected s] pairs]
+                 (is (eq expected s)))))))
+       (testing "subset"
+         (p/let [js (compiler/compile-string "(ns foo (:require [clojure.set :as set]))
+                   [(set/subset?)
+                    (set/subset? #{:a :b})
+                    (set/subset? #{:a :b} #{:a :b :c})
+                    (set/subset? #{:a :b :d} #{:a :b :c})
+                    (set/subset? #{:a :b} #{:a :b})]" {:repl true
+                                                       :context :return})
+                 vs (js/eval (wrap-async js))]
+           (let [expected [true
+                           false
+                           true
+                           false
+                           true]
+                 pairs (map vector expected vs)]
+             (doseq [[expected s] pairs]
+               (is (eq expected s))))))
+       (testing "superset?"
+         (p/let [js (compiler/compile-string "(ns foo (:require [clojure.set :as set]))
+                     [(set/superset?)
+                      (set/superset? #{:a :b})
+                      (set/superset? #{:a :b :c} #{:a :b})
+                      (set/superset? #{:a :b :c} #{:a :b :d})
+                      (set/superset? #{:a :b} #{:a :b})]" {:repl true
+                                                           :context :return})
+                 vs (js/eval (wrap-async js))]
+           (let [expected [true
+                           true
+                           true
+                           false
+                           true]
+                 pairs (map vector expected vs)]
+             (doseq [[expected s] pairs]
+               (is (eq expected s))))))
+       (testing "select"
+         (p/let [set (fn [& xs] (new js/Set xs))
+                 js (compiler/compile-string "(ns foo (:require [clojure.set :as set]))
+                   [(set/select)
+                    (set/select even?)
+                    (set/select identity #{0 1 2 3})
+                    (set/select even? #{1 2 3 4 5})
+                    (set/select #(> % 2) #{1 2 3 4 5})
+                    (set/select #(= % :a) #{:a :b :c})]" {:repl true
+                                                          :context :return})
+                 vs (js/eval (wrap-async js))]
+           (let [expected [nil
+                           nil
+                           (set 0 1 2 3)
+                           (set 2 4)
+                           (set 3 4 5)
+                           (set "a")]
+                 pairs (map vector expected vs)]
+             (doseq [[expected s] pairs]
+               (is (eq expected s) (str "expected vs actual:"
+                                        (util/inspect expected) (util/inspect s)))))))
+       (testing "rename-keys"
+         (p/let [js (compiler/compile-string "(ns foo (:require [clojure.set :as set]))
+                 [(set/rename-keys {:a 1, :b 2} {:a :new-a, :b :new-b})
+                  (set/rename-keys {:a 1} {:b :new-b})
+                  (set/rename-keys {:a 1 :b 2}  {:a :b :b :a})
+                  (set/rename-keys (new js/Map [[:a {:b 1}]]) {:a {:c 2}})]" {:repl true
+                                                                              :context :return})
+                 vs (js/eval (wrap-async js))]
+           (let [expected [{:new-a 1, :new-b 2}
+                           {:a 1}
+                           {:b 1, :a 2}
+                           (new js/Map (clj->js [[{:c 2} {:b 1}]]))]
+                 pairs (map vector expected vs)]
+             (doseq [[expected s] pairs]
+               (is (eq expected s) (str "expected vs actual:"
+                                        (util/inspect expected) (util/inspect s)))))))
+       (testing "rename"
+         (p/let [js (compiler/compile-string "(ns foo (:require [clojure.set :as set]))
+                        [(set/rename #{ {:a 1, :b 2} {:a 3, :b 4} } {:a :new-a, :b :new-b})
+                         (set/rename #{ {:a 1} {:a 2 :b 3} } {:b :new-b})
+                         (set/rename #{ {:a 1 :b 2} {:a 3 :b 4} }  {:a :b :b :a})
+                         (set/rename #{ (new js/Map [[:a {:b 1}]]) } {:a {:c 2}})]" {:repl true
+                                                                                     :context :return})
+                 vs (js/eval (wrap-async js))]
+           (let [set (fn [& xs] (new js/Set xs))
+                 expected [(set #js {:new-a 1, :new-b 2} #js {:new-a 3, :new-b 4})
+                           (set #js {:a 1} #js {:a 2 :new-b 3})
+                           (set #js {:b 1, :a 2} #js {:b 3, :a 4})
+                           (set (new js/Map (clj->js [[{:c 2} {:b 1}]])))]
+                 pairs (map vector expected vs)]
+             (doseq [[expected s] pairs]
+               (is (eq expected s) (str "expected vs actual:"
+                                        (util/inspect expected) (util/inspect s)))))))
+       (testing "project"
+         (p/let [js (compiler/compile-string "(ns foo (:require [clojure.set :as set]))
+                        [(set/project #{ {:a 1, :b 2, :c 3} {:a 4, :b 5, :c 6} } [:a :b])
+                         (set/project #{ {:a 1 :b 2} {:a 4 :b 5 :c 6} }  [:a :b :c :d])
+                         (set/project #{ (new js/Map [[:a 1] [:d 3]]) } [:a])]" {:repl true
+                                                                                 :context :return})
+                 vs (js/eval (wrap-async js))]
+           (let [set (fn [& xs] (new js/Set xs))
+                 expected [(set #js {:a 1, :b 2} #js {:a 4, :b 5})
+                           (set #js {:a 1, :b 2} #js {:a 4, :b 5, :c 6})
+                           (set (new js/Map (clj->js [[:a 1]])))]
+                 pairs (map vector expected vs)]
+             (doseq [[expected s] pairs]
+               (is (eq expected s) (str "expected vs actual:"
+                                        (util/inspect expected) (util/inspect s)))))))
+       (testing "map-invert"
+         (p/let [js (compiler/compile-string "(ns foo (:require [clojure.set :as set]))
+                               [(set/map-invert)
+                                (set/map-invert {})
+                                (set/map-invert {:a 1, :b 2, :c 3})
+                                (set/map-invert (new js/Map [[:a 1] [:d 3]]))]" {:repl true
+                                                                                 :context :return})
+                 vs (js/eval (wrap-async js))]
+           (let [expected [{}
+                           {}
+                           {1 :a 2 :b 3 :c}
+                           (new js/Map (clj->js [[1 :a] [3 :d]]))]
+                 pairs (map vector expected vs)]
+             (doseq [[expected s] pairs]
+               (is (eq expected s) (str "expected vs actual:"
+                                        (util/inspect expected) (util/inspect s)))))))
+       (testing "join"
+         (p/let [js (compiler/compile-string "(ns foo (:require [clojure.set :as set]))
+                      [(set/join #{ {:a 1} {:a 2} } #{ {:b 1} {:b 2} })
+                       (set/join #{ {:name \"betsy\" :owner \"brian\" :kind \"cow\"}
+                                     {:name \"jake\"  :owner \"brian\" :kind \"horse\"}
+                                     {:name \"josie\" :owner \"dawn\"  :kind \"cow\"} }
+                                 #{ {:kind \"cow\" :personality \"stoic\"}
+                                    {:kind \"horse\" :personality \"skittish\"} })
+                       (set/join #{ {:name \"betsy\" :owner \"brian\" :kind \"cow\"}
+                                     {:name \"jake\"  :owner \"brian\" :kind \"horse\"}
+                                     {:name \"josie\" :owner \"dawn\"  :kind \"cow\"} }
+                                 #{ {:species \"cow\" :personality \"stoic\"}
+                                    {:species \"horse\" :personality \"skittish\"} }
+                                 {:kind :species})]" {:repl true
+                                                      :context :return})
+                 vs (js/eval (wrap-async js))]
+           (let [set (fn [& xs] (new js/Set xs))
+                 expected [(set #js {:a 1, :b 1} #js {:a 1, :b 2} #js {:a 2, :b 1} #js {:a 2, :b 2})
+                           (set #js {:name "betsy", :owner "brian", :kind "cow", :personality "stoic"}
+                                #js {:name "jake", :owner "brian", :kind "horse", :personality "skittish"}
+                                #js {:name "josie", :owner "dawn", :kind "cow", :personality "stoic"})
+                           (set #js {:name "betsy", :owner "brian", :kind "cow", :species "cow", :personality "stoic"}
+                                #js {:name "jake", :owner "brian", :kind "horse", :species "horse", :personality "skittish"}
+                                #js {:name "josie", :owner "dawn", :kind "cow", :species "cow", :personality "stoic"})]
+                 pairs (map vector expected vs)]
+             (doseq [[expected s] pairs]
+               (is (eq expected s) (str "expected vs actual:"
+                                        (util/inspect expected) (util/inspect s)))))))
+       (testing "join-renaming-keys"
+         (p/let [js (compiler/compile-string "(ns foo (:require [clojure.set :as set]))
+                      [(set/project
+                       (set/join #{{:user-id 2, :name \"jake\", :age 28, :type \"company\"}
+                                   {:user-id 3, :name \"amanda\", :age 63, :type \"personal\"}
+                                   {:user-id 1, :name \"john\", :age 22, :type \"personal\"}}
+                                 (set/rename #{{:acc-id 2, :user-id 2, :amount 1200, :type \"saving\"}
+                                               {:acc-id 3, :user-id 1, :amount 850.1, :type \"debit\"}
+                                               {:acc-id 1, :user-id 1, :amount 300.45, :type \"saving\"}}
+                                             {:type :atype}))
+                       [:user-id :acc-id :type :atype])]" {:repl true
+                                                           :context :return})
+                 vs (js/eval (wrap-async js))]
+           (let [set (fn [& xs] (new js/Set xs))
+                 expected [(set #js {:user-id 1, :acc-id 1, :type "personal", :atype "saving"}
+                                #js {:user-id 2, :acc-id 2, :type "company", :atype "saving"}
+                                #js {:user-id 1, :acc-id 3, :type "personal", :atype "debit"})]
+                 pairs (map vector expected vs)]
+             (doseq [[expected s] pairs]
+               (is (eq expected s) (str "expected vs actual:"
+                                        (util/inspect expected) (util/inspect s))))))))
+     (p/finally done))))
+
+(deftest Symbol_iterator-is-destructurable-test
+  (let [js-obj (js/eval "
+function define(obj, props) {
+    for (const key of Reflect.ownKeys(props)) {
+        const { get, set, value } = Object.getOwnPropertyDescriptor(props, key);
+        let desc =
+            get || set
+                ? { get, set, configurable: true }
+                : { value, writable: true, configurable: true };
+        Object.defineProperty(obj, key, desc);
+    }
+}
+
+class Foo {
+  [Symbol.iterator]() {
+    return { next: () => ({value: 1, done: false}) };
+  }
+};
+
+
+new Foo();")
+        f (jsv! '(let [f (fn [js-obj]
+                           (let [[x y] js-obj]
+                             [x x y y]))]
+                   f))]
+    (is (eq [1 1 1 1] (f js-obj)))))
+
+(deftest flatten-test
+  (is (eq [1 2 3 4 3] (jsv! '(vec (flatten '(1 2 (3 (4 (((3)))))))))))
+  (is (eq 0 (jsv! '(first (flatten (map range (range))))))))
+
+(deftest counted?-test
+  (is (true? (jsv! '(counted? {})))))
+
+(deftest persistent!-test
+  (is (eq {} (jsv! '(persistent! (transient {})))))
+  (is (thrown? js/Error (jsv! '(assoc! (persistent! (transient {})) :a 1))))
+  (is (eq {:a 1} (jsv! '(assoc! (transient (persistent! (transient {}))) :a 1)))))
+
+(deftest sorted-set-test
+  (is (eq -10 (first (jsv! '(sorted-set 1 2 3 -10)))))
+  (is (eq -10 (first (jsv! '(sorted-set 1 2 3 -10)))))
+  (is (eq [-10000 -1000 1 100] (jsv! '(vec (conj (disj (sorted-set 1 -10 100 -1000) -10) -10000 -10000))))))
+
+(deftest subseq-test
+  (is (eq [1] (jsv! '(subseq (sorted-set 1 2 3 4) < 2))))
+  (is (eq [3 4] (jsv! '(subseq (sorted-set 1 2 3 4) > 2))))
+  (is (eq [104] (jsv! '(subseq (sorted-set 3 27 49 70 71 104) > 87 < 128))))
+  (is (eq [4 5 6 7 8 9] (jsv! '(subseq (sorted-set 1 2 3 4 5 6 7 8 9 0) <= 4 >= 2)))))
+
+(deftest cat-test
+  (is (eq [1 2 3 4 5 6] (jsv! '(into [] cat [[1 2 3] [4 5 6]])))))
 
 (defn init []
   (t/run-tests 'squint.compiler-test 'squint.jsx-test 'squint.string-test))

@@ -1,7 +1,8 @@
 (ns tasks
   (:require
    [babashka.fs :as fs]
-   [babashka.process :refer [shell]]
+   [babashka.http-server :as server]
+   [babashka.process :as p :refer [shell]]
    [cheshire.core :as json]
    [node-repl-tests]
    [clojure.string :as str]))
@@ -35,7 +36,7 @@
 (defn publish []
   (build-squint-npm-package)
   (run! fs/delete (fs/glob "lib" "*.map"))
-  (shell "esbuild src/squint/core.js --minify --format=iife --global-name=squint.core --outfile=lib/squint.core.umd.js")
+  (shell "npx esbuild src/squint/core.js --minify --format=iife --global-name=squint.core --outfile=lib/squint.core.umd.js")
   (shell "npm publish"))
 
 (defn watch-squint []
@@ -67,4 +68,26 @@
   (node-repl-tests/run-tests {})
   (test-project {}))
 
+(defn libtests []
+  #_(build-squint-npm-package)
+  (let [dir "libtests"]
+    (fs/delete-tree dir)
+    (fs/create-dir dir)
+    (shell {:dir dir} "git clone https://github.com/nextjournal/clojure-mode")
+    (let [dir (fs/path dir "clojure-mode")
+          shell (partial p/shell {:dir dir})
+          squint-local (fs/path dir "node_modules/squint-cljs")]
+      (fs/create-dirs dir)
+      (shell "yarn install")
+      (fs/delete-tree squint-local)
+      (fs/create-dirs squint-local)
+      (run! #(fs/copy % squint-local) (fs/glob "." "*.{js,json}"))
+      (fs/copy-tree "lib" (fs/path squint-local "lib"))
+      (fs/copy-tree "src" (fs/path squint-local "src"))
+      (shell "node_modules/squint-cljs/node_cli.js" "compile")
+      (shell "node dist/nextjournal/clojure_mode_tests.mjs")
+      (println "clojure-mode tests successful!"))))
 
+(defn start-playground-server [opts]
+  (server/exec (merge {:dir "."}
+                      opts)))

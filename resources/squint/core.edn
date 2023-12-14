@@ -7,8 +7,13 @@
   PROTOCOL_SENTINEL
   _
   _GT_
+  _GT__EQ_
+  _LT_
+  _LT__EQ_
   _PLUS_
+  _STAR_
   _iterator
+  abs
   aclone
   add_watch
   alength
@@ -24,6 +29,7 @@
   boolean_QMARK_
   bounded_count
   butlast
+  cat
   coll_QMARK_
   comp
   compare
@@ -65,6 +71,7 @@
   filterv
   find
   first
+  flatten
   fn_QMARK_
   fnil
   frequencies
@@ -93,6 +100,7 @@
   lazy
   list
   list_QMARK_
+  long$
   map
   map_QMARK_
   map_indexed
@@ -111,6 +119,7 @@
   nil_QMARK_
   not
   not_any_QMARK_
+  not_empty
   not_every_QMARK_
   nth
   number_QMARK_
@@ -121,6 +130,7 @@
   partition
   partition_all
   partition_by
+  persistent_BANG_
   pos_QMARK_
   pr_str
   println
@@ -131,11 +141,13 @@
   range
   re_find
   re_matches
+  re_pattern
   re_seq
   reduce
   reduce_kv
   reduced
   reduced_QMARK_
+  reductions
   regexp_QMARK_
   remove
   remove_watch
@@ -149,7 +161,9 @@
   second
   select_keys
   seq
+  seq_QMARK_
   seqable_QMARK_
+  sequential_QMARK_
   set
   shuffle
   some
@@ -157,11 +171,13 @@
   some_fn
   sort
   sort_by
+  sorted_set
   split_at
   split_with
   str
   string_QMARK_
   subs
+  subseq
   subvec
   swap_BANG_
   system_time
@@ -171,7 +187,11 @@
   take_while
   to_array
   transduce
+  transient$
+  tree_seq
   true_QMARK_
+  truth_
+  type
   update
   update_BANG_
   update_in
@@ -182,4 +202,5 @@
   vector_QMARK_
   warn_on_lazy_reusage_BANG_
   with_meta
-  zero_QMARK_}
+  zero_QMARK_
+  zipmap}

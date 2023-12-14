@@ -2,6 +2,116 @@
 
 [Squint](https://github.com/squint-cljs/squint): ClojureScript syntax to JavaScript compiler
 
+## v0.4.81 (2023-12-11)
+
+- Fix `compileString` in JS API
+
+## v0.4.80 (2023-12-11)
+
+- Optimization: sort largest set first for `set/union`, and smallest first for `set/intersection`
+- Add `sorted-set`, `long`, `abs`, `keep-indexed` transducer arity
+
+## v0.4.79 (2023-12-09)
+
+- The `children` function in `tree-seq` may return `nil`
+
+## v0.4.78 (2023-12-09)
+
+- Add `clojure.set/join`
+- Add `tree-seq`, `flatten`, `seq?` and `sequential?`
+
+## 0.4.77 (2023-12-09)
+
+- Add `clojure.set` functions `select`, `rename-keys`, `rename`, `project`, and `map-invert` ([@PEZ](https://github.com/PEZ))
+- Fix `reduce-kv` with `js/Map` input
+
+## 0.4.76 (2023-12-07)
+
+- Add more `clojure.set` functions: `difference`, `union`, `subset?`, and `superset?` ([@PEZ](https://github.com/PEZ))
+
+## 0.4.75 (2023-12-07)
+
+- Let any object that has `Symbol.iterable` be destructureable even if it is not `instance of Object`
+
+## 0.4.74 (2023-12-07)
+
+- Initial version of `clojure.set`
+- [#418](https://github.com/squint-cljs/squint/issues/418): Add `reductions`
+- Add `bit-shift-left` and more `bit-` related macros
+- Fix `not` with respect to truthiness
+- Fix `reduce` without initial value + empty coll, it should call `f()`
+- Add serve-playground bb task
+- Update playground with button for creating a blank AOC playground
+
+## 0.4.73 (2023-12-05)
+
+- [#407](https://github.com/squint-cljs/squint/issues/407): fix conditional rendering
+- Add `not-empty`
+- Fix `into` + set + xform
+
+## 0.4.72 (2023-12-04)
+
+- Allow JSX to be used in playground. See [react](https://squint-cljs.github.io/squint/?repl=true&src=KHJlcXVpcmUgJ1sicmVhY3QiIDphcyByZWFjdF0pCihyZXF1aXJlICdbInJlYWN0LWRvbSIgOmFzIHJkb21dKQoKKGRlZm9uY2UgY29tcG9uZW50LXN0YXRlIChhdG9tIDApKQoKKGRlZm4gQmFyIFt7OmtleXMgW2ZpcnN0bmFtZSBsYXN0bmFtZV0gOmFzIHByb3BzfV0KICAobGV0IFtbY2xpY2tzIHNldENsaWNrc10gKHJlYWN0L3VzZVN0YXRlIEBjb21wb25lbnQtc3RhdGUpXQogICAgI2pzeCBbOjw%2BCiAgICAgICAgICBbOnNwYW4gZmlyc3RuYW1lICIgIiBsYXN0bmFtZV0KICAgICAgICAgIFs6ZGl2ICJZb3UgY2xpY2tlZCAiIGNsaWNrcyAiIHRpbWVzISJdCiAgICAgICAgICBbOmJ1dHRvbiB7Om9uQ2xpY2sgIyhzZXRDbGlja3MgKHN3YXAhIGNvbXBvbmVudC1zdGF0ZSBpbmMpKX0KICAgICAgICAgICAiQ2xpY2sgbWUiXV0pKQoKKGRlZm4gRm9vIFtdCiAgI2pzeCBbOmRpdiAiSGVsbG8sICIKICAgICAgICAobGV0IFttIChhc3NvYyB7OmZpcnN0bmFtZSAiTWljaGllbCJ9IDpsYXN0bmFtZSAiQm9ya2VudCIpXQogICAgICAgICAgI2pzeCBbQmFyIHs6JiBtfV0pXSkKCihkZWZvbmNlIGVsdCAoZG90byAoanMvZG9jdW1lbnQuY3JlYXRlRWxlbWVudCAiZGl2IikKICAgICAgICAgICAgICAgKGpzL2RvY3VtZW50LmJvZHkucHJlcGVuZCkpKQoKKGRlZiByb290IChyZG9tL2NyZWF0ZVJvb3QgZWx0KSkKCigucmVuZGVyIHJvb3QgI2pzeCBbRm9vXSk%3D) example.
+- Add `re-pattern` (fixes [#396](https://github.com/squint-cljs/squint/issues/396))
+- Add `zipmap`
+
+## 0.4.71 (2023-12-02)
+
+- More helpful error from JS when using unresolved symbol in REPL mode
+
+## 0.4.70 (2023-12-02)
+
+- Allow `>`, `<` etc to be used as HOFs
+- Fix `str/split` with respect to trailing empty split elements
+
+## 0.4.69 (2023-12-02)
+
+- Fix vararg functions in REPL mode
+
+## 0.4.68 (2023-12-01)
+
+- [#394](https://github.com/squint-cljs/squint/issues/394): add `int`
+- [#393](https://github.com/squint-cljs/squint/issues/393): `Math` can be used without `js/` prefix
+- Expose compiler state via `compileStringEx` for playground, preserves namespace transitions
+
+## 0.4.67 (2023-11-28)
+
+- Restore backward compatibility with code that is compiled with older versions of squint
+
+## 0.4.66 (2023-11-28)
+
+- Optimize various outputs for smaller size
+- Add `js-in`
+
+## 0.4.65 (2023-11-28)
+
+- Support `into` + `xform`
+
+## 0.4.64 (2023-11-27)
+
+- Support `sort` on strings
+
+## 0.4.63 (2023-11-26)
+
+- [#386](https://github.com/squint-cljs/squint/issues/386): allow expression in value position in map literal
+
+## 0.4.62 (2023-11-25)
+
+- Improvements with respect to laziness in `mapcat` and `concat`
+- Do not array mutate argument in `reverse`
+
+## 0.4.61 (2023-11-25)
+
+- Escape JSX attribute vector value (and more)
+
+## 0.4.60 (2023-11-24)
+
+- `map` + `transduce` support
+- Fix `for` in REPL mode
+- Throw when object is not iterable in `for`
+- Make next lazy when input is lazy
+- Fix playground shim (fixes issue in older versions of Safari)
+
 ## 0.4.59 (2023-11-23)
 
 - Add `js-mod` and `quot`
